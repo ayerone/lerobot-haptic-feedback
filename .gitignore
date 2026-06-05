@@ -4,3 +4,4 @@ PERSONAL/
 
 **/__pycache__/
 **/*.egg-info/
+test_*.py

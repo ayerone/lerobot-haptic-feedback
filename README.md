@@ -34,15 +34,12 @@ def send_feedback(self, feedback: dict[str, float]) -> None:
 And the implementation in `FeedbackLeader` is quite simple — it delegates to a `GripFeedbackController` that owns the feedback policy state and logic:
 ```python
 def send_feedback(self, feedback: dict[str, float]) -> None:
-    cmd = self._grip_controller.compute(
+    torque = self._grip_controller.compute(
         feedback["sensor.force"], self._gimbal_position, feedback["gripper.pos"]
     )
-    if cmd.vibrate:
-        self.feedback_motor.vibrate(cmd.value, center=cmd.center)
-    else:
-        self.feedback_motor.write(cmd.value)
+    self.feedback_motor.write(torque)
 ```
-The controller maps force sensor readings to motor torque commands, with a derivative envelope to catch the onset of contact, a force limit that clamps the gripper position and adds a gimbal restore force, and a jaw-open spring that nudges the feedback motor back when the teleop is open much wider than the robot.
+The controller automatically regulates gripping force via a P controller targeting a setpoint of 20 (0–100 scale), applies a spring torque so the operator feels resistance when the gimbal is closed past the follower's actual position, and nudges the feedback motor back when the teleop is open much wider than the robot.
 
 A class is created to handle the sensor (ForceSensor), and another class to handle the feedback motor (FeedbackMotor), and each is managed by its respective arm.
 

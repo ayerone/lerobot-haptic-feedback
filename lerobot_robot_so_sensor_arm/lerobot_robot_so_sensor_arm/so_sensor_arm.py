@@ -62,8 +62,9 @@ class SOSensorArm(SO101Follower):
 
     def get_observation(self) -> RobotObservation:
         obs_dict = super().get_observation()
-        # TODO: time the sensor read operation
         obs_dict["sensor.force"] = self.sensor.read()
+        obs_dict["gripper.present_current"] = float(self.bus.read("Present_Current", "gripper"))
+        obs_dict["gripper.present_load"]    = float(self.bus.read("Present_Load",    "gripper"))
         return obs_dict
     
     def disconnect(self) -> None:

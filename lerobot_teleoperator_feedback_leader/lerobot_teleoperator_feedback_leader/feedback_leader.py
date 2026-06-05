@@ -13,96 +13,25 @@ from .feedback_motor import FeedbackMotor, GimbalCalibration
 logger = logging.getLogger(__name__)
 
 
-class GripFeedbackController:
-    SENSOR_DEADBAND_THRESHOLD = 2
-    FORCE_LIMIT_THRESHOLD = 30
-    TELEOP_EFFECTOR_TOO_OPEN_THRESHOLD = 15
-    JAW_OPEN_SCALAR = 0.01
-
-    FORCE_SETPOINT = 20.0
-    AUTO_GRIP_P_GAIN = 0.01
-    AUTO_GRIP_DEADBAND = 4.0
-    AUTO_GRIP_BREAK_THRESHOLD = 3.0
-    GRIP_SPRING_SCALAR = 1.0
-    MAX_INTENTIONAL_SQUEEZE = 2.0
-
-    def __init__(self):
-        self._grip_clamp_position: float | None = None
-        self._auto_grip_pos: float | None = None
-        self._tightest_pos: float | None = None
-        self._auto_grip_broken: bool = False
-
-    @property
-    def grip_clamp_position(self) -> float | None:
-        return self._grip_clamp_position
-
-    @property
-    def auto_grip_pos(self) -> float | None:
-        return self._auto_grip_pos
-
-    def _grip_spring_torque(self, gimbal_pos: float, reference: float) -> float:
-        # Negative torque pushes the gimbal toward opening when closed past reference.
-        displacement = max(0.0, reference - gimbal_pos)
-        return -self.GRIP_SPRING_SCALAR * math.sqrt(displacement)
-
-    def compute(self, force: float, gimbal_pos: float, gripper_pos: float) -> float:
-        # Break auto-grip if user opens teleop significantly beyond current target
-        if self._auto_grip_pos is not None and gimbal_pos > self._auto_grip_pos + self.AUTO_GRIP_BREAK_THRESHOLD:
-            self._auto_grip_pos = None
-            self._tightest_pos = None
-            self._auto_grip_broken = True
-
-        # Above force limit: activate/update auto-grip with P control
-        if force > self.FORCE_LIMIT_THRESHOLD:
-            if self._grip_clamp_position is None:
-                self._grip_clamp_position = gimbal_pos
-            if self._auto_grip_pos is None and not self._auto_grip_broken:
-                self._auto_grip_pos = gripper_pos
-                self._tightest_pos = gripper_pos
-            if self._auto_grip_pos is not None and abs(force - self.FORCE_SETPOINT) > self.AUTO_GRIP_DEADBAND:
-                self._auto_grip_pos += self.AUTO_GRIP_P_GAIN * (force - self.FORCE_SETPOINT)
-                self._tightest_pos = min(self._tightest_pos, self._auto_grip_pos)
-                self._auto_grip_pos = min(self._auto_grip_pos, self._tightest_pos)  # redundant; kept for clarity if blend is reintroduced
-            if self._auto_grip_pos is not None and gimbal_pos < self._auto_grip_pos:
-                self._auto_grip_pos = max(gimbal_pos, self._tightest_pos - self.MAX_INTENTIONAL_SQUEEZE)
-            return self._grip_spring_torque(gimbal_pos, gripper_pos)
-
-        # Normal gripping: activate/update auto-grip with P control
-        if force > self.SENSOR_DEADBAND_THRESHOLD:
-            self._grip_clamp_position = None
-            if self._auto_grip_pos is None and not self._auto_grip_broken:
-                self._auto_grip_pos = gripper_pos
-                self._tightest_pos = gripper_pos
-            if self._auto_grip_pos is not None and abs(force - self.FORCE_SETPOINT) > self.AUTO_GRIP_DEADBAND:
-                self._auto_grip_pos += self.AUTO_GRIP_P_GAIN * (force - self.FORCE_SETPOINT)
-                self._tightest_pos = min(self._tightest_pos, self._auto_grip_pos)
-                self._auto_grip_pos = min(self._auto_grip_pos, self._tightest_pos)  # redundant; kept for clarity if blend is reintroduced
-            if self._auto_grip_pos is not None and gimbal_pos < self._auto_grip_pos:
-                self._auto_grip_pos = max(gimbal_pos, self._tightest_pos - self.MAX_INTENTIONAL_SQUEEZE)
-            return self._grip_spring_torque(gimbal_pos, gripper_pos)
-
-        # No contact: reset clamp and break latch
-        self._grip_clamp_position = None
-        self._auto_grip_broken = False
-        if self._auto_grip_pos is not None:
-            return self._grip_spring_torque(gimbal_pos, self._auto_grip_pos)
-
-        # Manual mode: apply jaw spring if teleop is too far open
-        error = gimbal_pos - gripper_pos
-        if error > self.TELEOP_EFFECTOR_TOO_OPEN_THRESHOLD:
-            return self.JAW_OPEN_SCALAR * error
-        return 0.0
-
-
 class FeedbackLeader(SO101Leader):
     config_class = FeedbackLeaderConfig
     name = "feedback_leader"
+
+    CURRENT_TORQUE_SCALAR = 0.3
+    CURRENT_LOCKOUT_THRESHOLD = 2.0  # counts; zero torque below this to prevent idle oscillation
+    SIGNAL_SMOOTH_ALPHA = 0.2   # EMA on input signals; ~2 Hz cutoff at 60 Hz
+    TORQUE_SMOOTH_ALPHA = 0.3   # EMA on output torque; ~14 dB rejection at 20 Hz
+    GRIPPER_VELOCITY_K = 0.05   # gripper velocity gate: weight = 1 / (1 + k * |v|)
 
     def __init__(self, config: FeedbackLeaderConfig):
         super().__init__(config)
 
         self._gimbal_position = 0
-        self._grip_controller = GripFeedbackController()
+        self.last_torque: float = 0.0
+        self._smooth_current: float = 0.0
+        self._smooth_load: float = 0.0
+        self._smooth_torque: float = 0.0
+        self._prev_gripper_pos: float | None = None
         self.gimbal_calibration: GimbalCalibration | None = None
         self.gimbal_calibration_fpath = HF_LEROBOT_CALIBRATION / TELEOPERATORS / self.name / f"{self.id}.gimbal.json"
         self._load_gimbal_calibration()
@@ -113,7 +42,7 @@ class FeedbackLeader(SO101Leader):
 
     @property
     def feedback_features(self) -> dict[str, type]:
-        return { "sensor.force": float, "gripper.pos": float }
+        return { "gripper.present_current": float, "gripper.present_load": float, "gripper.pos": float }
 
     @property
     def is_connected(self) -> bool:
@@ -168,25 +97,44 @@ class FeedbackLeader(SO101Leader):
 
         # Clip at robot_jaw_max_angle so a full gimbal rotation maps to a narrower gripper range, gaining resolution.
         self._gimbal_position = self.feedback_motor.read()
-        max_angle = self.feedback_motor.robot_jaw_max_angle
-
-        if self._grip_controller.auto_grip_pos is not None:
-            to_send = self._grip_controller.auto_grip_pos
-        else:
-            to_send = min(self._gimbal_position, max_angle)
-            if self._grip_controller.grip_clamp_position is not None:
-                to_send = max(to_send, self._grip_controller.grip_clamp_position)
-
-        so_action["gripper.pos"] = to_send
+        so_action["gripper.pos"] = min(self._gimbal_position, self.feedback_motor.robot_jaw_max_angle)
 
         return so_action
 
     @check_if_not_connected
     def send_feedback(self, feedback: dict[str, float]) -> None:
-        torque = self._grip_controller.compute(
-            feedback["sensor.force"], self._gimbal_position, feedback["gripper.pos"]
-        )
-        self.feedback_motor.write(torque)
+        α = self.SIGNAL_SMOOTH_ALPHA
+        self._smooth_current += α * (feedback["gripper.present_current"] - self._smooth_current)
+        self._smooth_load    += α * (feedback["gripper.present_load"]    - self._smooth_load)
+
+        gripper_pos = feedback["gripper.pos"]
+        if self._prev_gripper_pos is None:
+            gripper_vel = 0.0
+        else:
+            gripper_vel = (gripper_pos - self._prev_gripper_pos) * 60  # units/s at ~60 Hz
+        self._prev_gripper_pos = gripper_pos
+
+        gripper_vel_weight = 1.0 / (1.0 + self.GRIPPER_VELOCITY_K * abs(gripper_vel))
+
+        if self._smooth_current * gripper_vel_weight < self.CURRENT_LOCKOUT_THRESHOLD:
+            raw_torque = 0.0
+        else:
+            # Sign from load, magnitude from current attenuated by gripper speed.
+            # Fast gripper movement → likely motion current, not contact force → reduce torque.
+            raw_torque = -math.copysign(
+                self.CURRENT_TORQUE_SCALAR * gripper_vel_weight * self._smooth_current,
+                self._smooth_load
+            )
+
+        self._smooth_torque += self.TORQUE_SMOOTH_ALPHA * (raw_torque - self._smooth_torque)
+
+        self.last_torque = self._smooth_torque
+        self.feedback_motor.write(self._smooth_torque)
+        try:
+            import rerun as rr
+            rr.log("gimbal/torque_command", rr.Scalars(self._smooth_torque))
+        except Exception:
+            pass
 
     @check_if_not_connected
     def disconnect(self) -> None:

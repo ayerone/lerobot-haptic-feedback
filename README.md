@@ -16,8 +16,8 @@ Each arm inherits from the standard so-101 base class for its type, leader and f
 class FeedbackLeader(SO101Leader):
     ...
     @property
-    def action_features(self) -> dict[str, type]:
-        return { **super().action_features, "gimbal.pos": float }
+    def feedback_features(self) -> dict[str, type]:
+        return { "sensor.force": float, "gripper.pos": float }
     ...
 ```
 Conveniently, LeRobot ecosystem automatically detects new robots and teleoperators installed in your python enviornment, as long as certain naming conventions are followed (https://huggingface.co/docs/lerobot/en/integrate_hardware).<br>
@@ -31,30 +31,19 @@ def send_feedback(self, feedback: dict[str, float]) -> None:
     # TODO: Implement force feedback
     raise NotImplementedError
 ```
-And my implementation is quite simple:
+And the implementation in `FeedbackLeader` is quite simple — it delegates to a `GripFeedbackController` that owns the feedback policy state and logic:
 ```python
-def send_feedback(self, feedback: dict[str, float]):
-        '''
-        When gripping an object, force reported by the robot is scaled by
-        GRIP_FEEDBACK_SCALAR (a property of this class, FeedbackLeader) to
-        determine torque exerted by the feedback motor on the teleop.
-
-        The gimbal motor has continuous rotation. To indicate the "fully open"
-        position to the operator:
-        when the teleop gripper control is significantly more open than the
-        robot's gripper, a simulated spring (with displacement "error") acts
-        to push the feedback motor toward the gripper "closed" position.
-        '''
-        # During gripping
-        if feedback["sensor.force"] > self.SENSOR_DEADBAND_THRESHOLD:
-            return self.feedback_motor.write(- self.GRIP_FEEDBACK_SCALAR * feedback["sensor.force"])
-        # During jaw wide open
-        error = self._gimbal_position - feedback["gripper.pos"]
-        if error > self.TELEOP_EFFECTOR_TOO_OPEN_THRESHOLD:
-            return self.feedback_motor.write(self.JAW_OPEN_SCALAR * error)
-        # Gripper in normal range & not touching anything
-        return self.feedback_motor.write(0)
+def send_feedback(self, feedback: dict[str, float]) -> None:
+    cmd = self._grip_controller.compute(
+        feedback["sensor.force"], self._gimbal_position, feedback["gripper.pos"]
+    )
+    if cmd.vibrate:
+        self.feedback_motor.vibrate(cmd.value, center=cmd.center)
+    else:
+        self.feedback_motor.write(cmd.value)
 ```
+The controller maps force sensor readings to motor torque commands, with a derivative envelope to catch the onset of contact, a force limit that clamps the gripper position and adds a gimbal restore force, and a jaw-open spring that nudges the feedback motor back when the teleop is open much wider than the robot.
+
 A class is created to handle the sensor (ForceSensor), and another class to handle the feedback motor (FeedbackMotor), and each is managed by its respective arm.
 
 ## Hardware / Architecture
@@ -62,11 +51,12 @@ The leader and the follower each get a companion microcontroller (I used arduino
 ![leader and follower and arduinos connected to the computer](images/feedback_teleop_hardware_setup.png)
 
 ## Install
-New robot and teleoperator embodiments must be installed in your lerobot virtual environment following specific naming conventions for lerobot to recognize them.  The following will install lerobot_robot_so_sensor_arm and lerobot_teleoperator_feedback_leader in editable mode so you can modify the code.
+New robot and teleoperator embodiments must be installed in your lerobot virtual environment following specific naming conventions for lerobot to recognize them. The following will install both packages in editable mode so you can modify the code.
 
 Clone this repo. cd into it. Ensure your lerobot virtual env is activated, and:
 ```shell
-pip install -e .
+pip install -e lerobot_robot_so_sensor_arm
+pip install -e lerobot_teleoperator_feedback_leader
 ```
 
 ## Use
@@ -87,4 +77,4 @@ and let's just say that's on my wish list.
 ## Small Notes
 At the time of writing (March 2026), I am using lerobot 0.4.4 with python 3.10.19
 
-I put lerobot>=0.4.3 in pyproject.toml, somewhat arbitrarily, and you can probably roll that back if you need to.
+I put lerobot>=0.4.3 in each package's pyproject.toml, somewhat arbitrarily, and you can probably roll that back if you need to.

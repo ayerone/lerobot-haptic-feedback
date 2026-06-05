@@ -1,5 +1,5 @@
 
-const int BAUD = 9600;
+const long BAUD = 115200;
 const int SENSOR_PIN = A0;
 
 void setup() {

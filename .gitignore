@@ -2,8 +2,5 @@
 ARCHIVE/
 PERSONAL/
 
-src/lerobot_robot_so_sensor_arm/__pycache__/
-src/lerobot_robot_so_sensor_arm/ARCHIVE/
-
-src/lerobot_teleoperator_feedback_leader/__pycache__/
-src/lerobot_teleoperator_feedback_leader/ARCHIVE/
+**/__pycache__/
+**/*.egg-info/

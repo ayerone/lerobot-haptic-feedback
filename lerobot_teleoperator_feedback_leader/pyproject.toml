@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot_teleoperator_feedback_leader"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot",
+    "pyserial>=3.5,<4.0",
+]

@@ -1,6 +1,5 @@
 import logging
 import math
-from dataclasses import dataclass
 
 import draccus
 
@@ -14,65 +13,85 @@ from .feedback_motor import FeedbackMotor, GimbalCalibration
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class FeedbackCommand:
-    value: float
-    vibrate: bool = False
-    center: float = 0.0
-
-
 class GripFeedbackController:
     SENSOR_DEADBAND_THRESHOLD = 2
-    VIBRATION_ONSET_FORCE = 5
     FORCE_LIMIT_THRESHOLD = 30
-    GRIP_FEEDBACK_SCALAR = 1 / 30
-    CONTACT_DERIVATIVE_SCALAR = 3
-    DERIVATIVE_DECAY = 0.9
-    GIMBAL_RESTORE_SCALAR = 0.05
     TELEOP_EFFECTOR_TOO_OPEN_THRESHOLD = 15
     JAW_OPEN_SCALAR = 0.01
 
+    FORCE_SETPOINT = 20.0
+    AUTO_GRIP_P_GAIN = 0.01
+    AUTO_GRIP_DEADBAND = 4.0
+    AUTO_GRIP_BREAK_THRESHOLD = 3.0
+    GRIP_SPRING_SCALAR = 1.0
+    MAX_INTENTIONAL_SQUEEZE = 2.0
+
     def __init__(self):
-        self._last_force = 0.0
-        self._derivative_envelope = 0.0
         self._grip_clamp_position: float | None = None
+        self._auto_grip_pos: float | None = None
+        self._tightest_pos: float | None = None
+        self._auto_grip_broken: bool = False
 
     @property
     def grip_clamp_position(self) -> float | None:
         return self._grip_clamp_position
 
-    def _compute_vibration_magnitude(self, force: float) -> float:
-        d_force = force - self._last_force
-        self._last_force = force
-        self._derivative_envelope = max(max(0.0, d_force), self._derivative_envelope * self.DERIVATIVE_DECAY)
-        steady_term = self.GRIP_FEEDBACK_SCALAR * math.sqrt(max(0.0, force - self.VIBRATION_ONSET_FORCE))
-        derivative_term = self.CONTACT_DERIVATIVE_SCALAR * self._derivative_envelope
-        return steady_term + derivative_term
+    @property
+    def auto_grip_pos(self) -> float | None:
+        return self._auto_grip_pos
 
-    def compute(self, force: float, gimbal_pos: float, gripper_pos: float) -> FeedbackCommand:
-        # Above force limit: clamp gripper position and vibrate with gimbal restore
+    def _grip_spring_torque(self, gimbal_pos: float, reference: float) -> float:
+        # Negative torque pushes the gimbal toward opening when closed past reference.
+        displacement = max(0.0, reference - gimbal_pos)
+        return -self.GRIP_SPRING_SCALAR * math.sqrt(displacement)
+
+    def compute(self, force: float, gimbal_pos: float, gripper_pos: float) -> float:
+        # Break auto-grip if user opens teleop significantly beyond current target
+        if self._auto_grip_pos is not None and gimbal_pos > self._auto_grip_pos + self.AUTO_GRIP_BREAK_THRESHOLD:
+            self._auto_grip_pos = None
+            self._tightest_pos = None
+            self._auto_grip_broken = True
+
+        # Above force limit: activate/update auto-grip with P control
         if force > self.FORCE_LIMIT_THRESHOLD:
             if self._grip_clamp_position is None:
                 self._grip_clamp_position = gimbal_pos
-            magnitude = self._compute_vibration_magnitude(force)
-            gimbal_drift = self._grip_clamp_position - gimbal_pos
-            restore = -self.GIMBAL_RESTORE_SCALAR * gimbal_drift if gimbal_drift > 0 else 0.0
-            return FeedbackCommand(value=magnitude, vibrate=True, center=restore)
+            if self._auto_grip_pos is None and not self._auto_grip_broken:
+                self._auto_grip_pos = gripper_pos
+                self._tightest_pos = gripper_pos
+            if self._auto_grip_pos is not None and abs(force - self.FORCE_SETPOINT) > self.AUTO_GRIP_DEADBAND:
+                self._auto_grip_pos += self.AUTO_GRIP_P_GAIN * (force - self.FORCE_SETPOINT)
+                self._tightest_pos = min(self._tightest_pos, self._auto_grip_pos)
+                self._auto_grip_pos = min(self._auto_grip_pos, self._tightest_pos)  # redundant; kept for clarity if blend is reintroduced
+            if self._auto_grip_pos is not None and gimbal_pos < self._auto_grip_pos:
+                self._auto_grip_pos = max(gimbal_pos, self._tightest_pos - self.MAX_INTENTIONAL_SQUEEZE)
+            return self._grip_spring_torque(gimbal_pos, gripper_pos)
 
-        # Normal gripping: vibrate without restore
+        # Normal gripping: activate/update auto-grip with P control
         if force > self.SENSOR_DEADBAND_THRESHOLD:
             self._grip_clamp_position = None
-            magnitude = self._compute_vibration_magnitude(force)
-            return FeedbackCommand(value=magnitude, vibrate=True)
+            if self._auto_grip_pos is None and not self._auto_grip_broken:
+                self._auto_grip_pos = gripper_pos
+                self._tightest_pos = gripper_pos
+            if self._auto_grip_pos is not None and abs(force - self.FORCE_SETPOINT) > self.AUTO_GRIP_DEADBAND:
+                self._auto_grip_pos += self.AUTO_GRIP_P_GAIN * (force - self.FORCE_SETPOINT)
+                self._tightest_pos = min(self._tightest_pos, self._auto_grip_pos)
+                self._auto_grip_pos = min(self._auto_grip_pos, self._tightest_pos)  # redundant; kept for clarity if blend is reintroduced
+            if self._auto_grip_pos is not None and gimbal_pos < self._auto_grip_pos:
+                self._auto_grip_pos = max(gimbal_pos, self._tightest_pos - self.MAX_INTENTIONAL_SQUEEZE)
+            return self._grip_spring_torque(gimbal_pos, gripper_pos)
 
-        # No contact: reset state, apply jaw spring if teleop is too far open
+        # No contact: reset clamp and break latch
         self._grip_clamp_position = None
-        self._last_force = 0.0
-        self._derivative_envelope = 0.0
+        self._auto_grip_broken = False
+        if self._auto_grip_pos is not None:
+            return self._grip_spring_torque(gimbal_pos, self._auto_grip_pos)
+
+        # Manual mode: apply jaw spring if teleop is too far open
         error = gimbal_pos - gripper_pos
         if error > self.TELEOP_EFFECTOR_TOO_OPEN_THRESHOLD:
-            return FeedbackCommand(value=self.JAW_OPEN_SCALAR * error)
-        return FeedbackCommand(value=0.0)
+            return self.JAW_OPEN_SCALAR * error
+        return 0.0
 
 
 class FeedbackLeader(SO101Leader):
@@ -150,10 +169,13 @@ class FeedbackLeader(SO101Leader):
         # Clip at robot_jaw_max_angle so a full gimbal rotation maps to a narrower gripper range, gaining resolution.
         self._gimbal_position = self.feedback_motor.read()
         max_angle = self.feedback_motor.robot_jaw_max_angle
-        to_send = min(self._gimbal_position, max_angle)
 
-        if self._grip_controller.grip_clamp_position is not None:
-            to_send = max(to_send, self._grip_controller.grip_clamp_position)
+        if self._grip_controller.auto_grip_pos is not None:
+            to_send = self._grip_controller.auto_grip_pos
+        else:
+            to_send = min(self._gimbal_position, max_angle)
+            if self._grip_controller.grip_clamp_position is not None:
+                to_send = max(to_send, self._grip_controller.grip_clamp_position)
 
         so_action["gripper.pos"] = to_send
 
@@ -161,13 +183,10 @@ class FeedbackLeader(SO101Leader):
 
     @check_if_not_connected
     def send_feedback(self, feedback: dict[str, float]) -> None:
-        cmd = self._grip_controller.compute(
+        torque = self._grip_controller.compute(
             feedback["sensor.force"], self._gimbal_position, feedback["gripper.pos"]
         )
-        if cmd.vibrate:
-            self.feedback_motor.vibrate(cmd.value, center=cmd.center)
-        else:
-            self.feedback_motor.write(cmd.value)
+        self.feedback_motor.write(torque)
 
     @check_if_not_connected
     def disconnect(self) -> None:

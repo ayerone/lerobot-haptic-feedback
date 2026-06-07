@@ -13,12 +13,14 @@ How can we sense the force that the robot's gripper is applying? You could add a
 **Leader side:**
 We need a gripper control that we can move smoothly, but one that will also provide force/torque feedback to let us know what's happening on the follower side. Using the leader's gripper servo isn't an option; even the lowest gear-ratio feetech servo (as is used in the SO-101 leader) has too much static friction to be capable here; it takes too much operator force just to get it moving, so can't be operated with a light touch.
 
+Enter: the *gimbal motor*.
+
 ![gimbal motor](images/gimbal_motor.jpg)
 
 The new motor is controlled by an Arduino running [SimpleFOC](https://simplefoc.com), an open-source field-oriented control library that makes torque-mode BLDC control easy to use. Note: SimpleFOC also requires a small motor driver board.
 
 **Follower side:**
-Stock SO-101! Originally for this project I used an analogue force sensor (a force-sensitive resistor), but now we read load/current values from the stock follower servo. All that's required is a Python package to make the follower read motor current/load and append that to its observation dict in `get_observation()`.
+Stock SO-101! Originally for this project I used an analogue force sensor (a force-sensitive resistor), but now we read load/current values from the stock follower servo. All that's required is a Python package (from this repo; discussed below) to make the follower read motor current/load and append that to its observation dict in `get_observation()`.
 
 ---
 
@@ -114,7 +116,7 @@ def feedback_features(self) -> dict[str, type]:
 
 ## Install
 
-Clone this repo, then install both packages in your virtual environment:
+Clone this repo, then install both packages in the virtual environment you use for lerobot:
 
 ```shell
 pip install -e lerobot_robot_so_feedback_follower

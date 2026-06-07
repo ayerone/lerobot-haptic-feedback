@@ -2,9 +2,9 @@ from dataclasses import dataclass
 
 from lerobot.teleoperators.config import TeleoperatorConfig
 
-@TeleoperatorConfig.register_subclass("feedback_leader")
+@TeleoperatorConfig.register_subclass("so_feedback_leader")
 @dataclass
-class FeedbackLeaderConfig(TeleoperatorConfig):
+class SOFeedbackLeaderConfig(TeleoperatorConfig):
     # Port to connect to the arm
     port: str
 

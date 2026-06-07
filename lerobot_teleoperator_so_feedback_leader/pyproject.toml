@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lerobot_robot_so_sensor_arm"
+name = "lerobot_teleoperator_so_feedback_leader"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [

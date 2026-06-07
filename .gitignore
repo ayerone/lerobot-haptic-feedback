@@ -1,6 +1,7 @@
 
 ARCHIVE/
 PERSONAL/
+log/
 
 **/__pycache__/
 **/*.egg-info/

@@ -7,15 +7,15 @@ from lerobot.teleoperators.so_leader import SO101Leader
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
 from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, TELEOPERATORS
 
-from .config_feedback_leader import FeedbackLeaderConfig
+from .config_so_feedback_leader import SOFeedbackLeaderConfig
 from .feedback_motor import FeedbackMotor, GimbalCalibration
 
 logger = logging.getLogger(__name__)
 
 
-class FeedbackLeader(SO101Leader):
-    config_class = FeedbackLeaderConfig
-    name = "feedback_leader"
+class SOFeedbackLeader(SO101Leader):
+    config_class = SOFeedbackLeaderConfig
+    name = "so_feedback_leader"
 
     CURRENT_TORQUE_SCALAR = 0.3
     CURRENT_LOCKOUT_THRESHOLD = 2.0  # counts; zero torque below this to prevent idle oscillation
@@ -23,7 +23,7 @@ class FeedbackLeader(SO101Leader):
     TORQUE_SMOOTH_ALPHA = 0.3   # EMA on output torque; ~14 dB rejection at 20 Hz
     GRIPPER_VELOCITY_K = 0.05   # gripper velocity gate: weight = 1 / (1 + k * |v|)
 
-    def __init__(self, config: FeedbackLeaderConfig):
+    def __init__(self, config: SOFeedbackLeaderConfig):
         super().__init__(config)
 
         self._gimbal_position = 0
@@ -103,9 +103,9 @@ class FeedbackLeader(SO101Leader):
 
     @check_if_not_connected
     def send_feedback(self, feedback: dict[str, float]) -> None:
-        α = self.SIGNAL_SMOOTH_ALPHA
-        self._smooth_current += α * (feedback["gripper.present_current"] - self._smooth_current)
-        self._smooth_load    += α * (feedback["gripper.present_load"]    - self._smooth_load)
+        alpha = self.SIGNAL_SMOOTH_ALPHA
+        self._smooth_current += alpha * (feedback["gripper.present_current"] - self._smooth_current)
+        self._smooth_load    += alpha * (feedback["gripper.present_load"]    - self._smooth_load)
 
         gripper_pos = feedback["gripper.pos"]
         if self._prev_gripper_pos is None:
@@ -130,11 +130,6 @@ class FeedbackLeader(SO101Leader):
 
         self.last_torque = self._smooth_torque
         self.feedback_motor.write(self._smooth_torque)
-        try:
-            import rerun as rr
-            rr.log("gimbal/torque_command", rr.Scalars(self._smooth_torque))
-        except Exception:
-            pass
 
     @check_if_not_connected
     def disconnect(self) -> None:

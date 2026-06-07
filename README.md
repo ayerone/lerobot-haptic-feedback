@@ -69,7 +69,7 @@ This factor is approximately 1 when the motor is nearly stopped (squeezing somet
 
 Well, the system was unstable. Let's imagine how a small perturbation propagates through the feedback loop. Say the reported motor current isn't exactly zero (this happens often, it sometimes sits at about 10 mA, even when there is no load or change to the servo). This causes the teleop.send_feedback() to send a torque back to the leader arm, which makes the gimbal motor move. This movement is interpreted as an action, which gets sent to the follower, telling *it* to move, increasing current in its motor, and therefore sending an even larger torque back to the gimbal. You can see how this quickly gets out of control.
 
-I hoped this could be solved by smoothing the gimbal torque itself, using another exponential moving average on the torque command before writing it to the gimbal. This mellowed out the oscillations quite a bit, but couldn't eliminate them entirely without starting to dull out responsiveness to true grip.
+I hoped this could be solved by smoothing the gimbal torque itself, using another exponential moving average on the torque command before writing it to the gimbal. This mellowed out the oscillations quite a bit, but couldn't eliminate them entirely without starting to dull out responsiveness to **true grip**.
 
 ![TRUE GRIT movie poster parody](images/true_grip.jpg)
 
@@ -142,7 +142,7 @@ python examples/lerobot_teleoperate.py \
 
 `teleop.feedback_port` is for the Arduino that piggybacks on the teleop to control the gimbal motor.
 
-**First run — calibration:** On first run, LeRobot will walk you through calibrating the arm joints as usual. The gimbal motor has its own calibration that runs after the regular one: move the gimbal through the range of motion you want to use to control the gripper, park it somewhere roughly in the middle of its range, then press Enter.
+**First run — calibration:** On first run, LeRobot will walk you through calibrating the arm joints as usual. The gimbal motor has its own calibration that runs after the regular one. The gimbal motor can rotate continuously (unless you add your end-stops), so just move the gimbal through the range of motion you want to use to control the gripper, park it somewhere roughly in the middle of its range, then press Enter. Done!
 
 ---
 

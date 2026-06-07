@@ -45,7 +45,9 @@ gripper.pos ─── diff×60 ──► gripper_velocity    │                
                                                                           EMA(α=0.3)──► gimbal torque
 ```
 
-Here's a look at the input signals in question, along with the calculated torque that gets sent to the leader's gimbal motor. At the beginning I squeeze an object (roll of electrical tape) a few times with increasing force each time; at the end I open and close the gripper a few times in free space. We'll dig into the relationships between these quantities later on, but for now you can see that the torque sent back to the leader correlates with gripping force, and ignores (even fast) gripper movements in free space, which was my goal.
+Here's a look at the input signals in question, along with the calculated torque that gets sent to the leader's gimbal motor. At the beginning of the 10 second window displayed, I squeeze an object (roll of electrical tape) a couple times, first soft and then hard. Notice that at that time, the motor current is high and the gripper isn't moving very much (in contact with the tape roll), and the gimbal torque (magnitude) is high (negative because it's pushing to "open" the teleop's gripper). At the end of the window, I open and close the gripper a few times in free space. The gripper is moving fast, and the servo current is significant, but the torque sent to the servo is at zero (the top line of that graph, since all values are negative).
+
+We'll dig into the relationships between these quantities later on, but for now you can see that the torque sent back to the leader correlates with gripping force, and ignores (even fast) gripper movements in free space, which achieves the goal of feeling the robot's gripping force at the teleoperator in real time.
 
 ![noisy servo signals in Rerun](images/rerun_noisy_current.png)
 
@@ -69,7 +71,7 @@ Well, the system was unstable. Let's imagine how a small perturbation propagates
 
 I hoped this could be solved by smoothing the gimbal torque itself, using another exponential moving average on the torque command before writing it to the gimbal. This mellowed out the oscillations quite a bit, but couldn't eliminate them entirely without starting to dull out responsiveness to true grip.
 
-![TRUE GRIT movie poster parody](images/true_grip.png)
+![TRUE GRIT movie poster parody](images/true_grip.jpg)
 
 My next idea was a "lockout," where a small current would not be translated into a feedback torque at all. This was promising, but it made real gripping feedback less responsive, since it ignored the current caused by the initial gripping force on an object. But by bringing back the last idea, the velocity weight, and combining that with the lockout, I arrived at a good solution. The velocity-weighted current sits below a threshold, and is locked out from actuating feedback torque, but the stationary / slow-moving gripper that is actively gripping produces a current that pops above the threshold, triggering the desired feedback torque on the teleop.
 

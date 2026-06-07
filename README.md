@@ -15,7 +15,7 @@ We need a gripper control that we can move smoothly, but one that will also prov
 
 Enter: the *gimbal motor*.
 
-![gimbal motor](images/gimbal_motor.jpg)
+<img src="images/gimbal_motor.jpg" width="576" alt="Gimbal motor mounted on SO-101 leader arm">
 
 The new motor is controlled by an Arduino running [SimpleFOC](https://simplefoc.com), an open-source field-oriented control library that makes torque-mode BLDC control easy to use. Note: SimpleFOC also requires a small motor driver board.
 
@@ -73,7 +73,7 @@ Well, the system was unstable. Let's imagine how a small perturbation propagates
 
 I hoped this could be solved by smoothing the gimbal torque itself, using another exponential moving average on the torque command before writing it to the gimbal. This mellowed out the oscillations quite a bit, but couldn't eliminate them entirely without starting to dull out responsiveness to **true grip**.
 
-![TRUE GRIT movie poster parody](images/true_grip.jpg)
+<img src="images/true_grip.jpg" width="576" alt="TRUE GRIT movie poster parody">
 
 My next idea was a "lockout," where a small current would not be translated into a feedback torque at all. This was promising, but it made real gripping feedback less responsive, since it ignored the current caused by the initial gripping force on an object. But by bringing back the last idea, the velocity weight, and combining that with the lockout, I arrived at a good solution. The velocity-weighted current sits below a threshold, and is locked out from actuating feedback torque, but the stationary / slow-moving gripper that is actively gripping produces a current that pops above the threshold, triggering the desired feedback torque on the teleop.
 
@@ -156,7 +156,7 @@ The project didn't start sensorless. I built a complete working system with a fo
 
 The original design added a force-sensitive resistor (FSR) to the follower's gripper (in the bottom jaw), read by a second Arduino Uno. The `SOFeedbackFollower` robot class read it and added `sensor.force` to the observation dict.
 
-![force sensor installed in gripper](images/gripper_with_sensor-fs8.png)
+<img src="images/gripper_with_sensor-fs8.png" width="576" alt="Force sensor installed in gripper">
 
 I developed and completed this version, complete with an (in-software) [proportional controller](#glossary) to make the gripper hold with a constant, light force, and ended up with a satisfactory, working solution.
 

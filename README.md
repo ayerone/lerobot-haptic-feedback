@@ -1,6 +1,6 @@
 # Haptic Feedback for LeRobot SO-101
 
-![SO Feedback Leader](images/so_feedback_leader.jpg)
+<img src="images/egg.gif" width="400" alt="Teleoperated egg pickup">
 
 This project adds haptic feedback to the SO-101 Leader. The leader gets a brushless ["gimbal" motor](#glossary) at the gripper joint that pushes back on the operator's hand when the follower gripper is under load. Without feedback, operators tend to squeeze too hard, and those actions enter the training dataset and get imitated during autonomous operation.
 
@@ -13,9 +13,12 @@ How can we sense the force that the robot's gripper is applying? You could add a
 **Leader side:**
 We need a gripper control that we can move smoothly, but one that will also provide force/torque feedback to let us know what's happening on the follower side. Using the leader's gripper servo isn't an option; even the lowest gear-ratio feetech servo (as is used in the SO-101 leader) has too much static friction to be capable here; it takes too much operator force just to get it moving, so can't be operated with a light touch.
 
-Enter: the *gimbal motor*.
+<p float="left">
+  <img src="images/gimbal_motor_graybg.jpg" width="348" alt="Gimbal motor mounted on SO-101 leader arm">
+  <img src="images/so_feedback_leader.jpg" width="288" alt="SO Feedback Leader">
+</p>
 
-<img src="images/gimbal_motor.jpg" width="576" alt="Gimbal motor mounted on SO-101 leader arm">
+Enter: the *gimbal motor*.
 
 The new motor is controlled by an Arduino running [SimpleFOC](https://simplefoc.com), an open-source field-oriented control library that makes torque-mode BLDC control easy to use. Note: SimpleFOC also requires a small motor driver board.
 
